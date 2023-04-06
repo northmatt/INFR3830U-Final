@@ -10,19 +10,24 @@ using System.Net;
 namespace Server {
     struct ClientInfo {
         public byte id;
+        public string name;
         public Socket TCPSocket;
         public EndPoint UDPEndpoint;
         public float[] position;
+        public float[] rotation;
+        public float[] velocity;
+        public float[] acceleration;
     }
 
     [Flags] enum DirtyFlag {
         None = 0,
-        Position = 1,
+        Transform = 1,
         Message = 2
     }
 
     public enum ServerNetworkCalls : byte {
-        TCPClientMessage = 0,
+        TCPSetClientName = 0,
+        TCPClientMessage = 1,
         UDPClientConnection = 0 + 0x10,
         UDPClientTransform = 1 + 0x10
     }
@@ -32,7 +37,8 @@ namespace Server {
         TCPClientDisconnection = 1,
         TCPClientTransform = 2,
         TCPClientsTransform = 3,
-        TCPClientMessage = 4,
+        TCPSetClientName = 4,
+        TCPClientMessage = 5,
         UDPClientsTransform = 0 + 0x10
     }
 
@@ -45,6 +51,8 @@ namespace Server {
         private static List<ClientInfo> clientInfoList = new List<ClientInfo>();
         private static bool shutdownServer = false;
         private static DirtyFlag dirtyFlag = DirtyFlag.None;
+        private static int maxExtraSend = 10;
+        private static int curExtraSend = 0;
 
         static void Main(string[] args) {
             StartServer("127.0.0.1", 8888);
@@ -214,9 +222,25 @@ namespace Server {
 
             //First byte is the "protocol"/"type" of data sent
             switch ((ServerNetworkCalls)data[0]) {
+                case ServerNetworkCalls.TCPSetClientName:
+                    int clientIndex = FindClientIndex(data[1]);
+                    if (clientIndex == -1) {
+                        Console.WriteLine("Cant rename client, client {0} not found", data[1]);
+                        break;
+                    }
+
+                    ClientInfo client = clientInfoList[clientIndex];
+                    client.name = Encoding.ASCII.GetString(data, 4, bufferLength - 4);
+                    clientInfoList[clientIndex] = client;
+                    Console.WriteLine("Renamed client {0} to {1}", data[1], FindClient(data[1]).name);
+
+                    data[0] = (byte)ClientNetworkCalls.TCPSetClientName;
+                    SendNetworkCallback(clientInfoList, data);
+
+                    break;
                 case ServerNetworkCalls.TCPClientMessage:
                     string message = Encoding.ASCII.GetString(data, 4, bufferLength - 4);
-                    message = "C" + data[1] + ": " + message;
+                    message = FindClient(data[1]).name + ": " + message;
                     Console.WriteLine(message);
 
                     data[0] = (byte)ClientNetworkCalls.TCPClientMessage;
@@ -262,7 +286,7 @@ namespace Server {
 
                     break;
                 case ServerNetworkCalls.UDPClientTransform:
-                    if (bufferLength != 16)
+                    if (bufferLength != 40)
                         break;
 
                     ClientInfo client = FindClient(data[1]);
@@ -272,8 +296,14 @@ namespace Server {
                     client.position[0] = BitConverter.ToSingle(data, 4);
                     client.position[1] = BitConverter.ToSingle(data, 8);
                     client.position[2] = BitConverter.ToSingle(data, 12);
+                    client.velocity[0] = BitConverter.ToSingle(data, 16);
+                    client.velocity[1] = BitConverter.ToSingle(data, 20);
+                    client.velocity[2] = BitConverter.ToSingle(data, 24);
+                    client.acceleration[0] = BitConverter.ToSingle(data, 28);
+                    client.acceleration[1] = BitConverter.ToSingle(data, 32);
+                    client.acceleration[2] = BitConverter.ToSingle(data, 36);
 
-                    dirtyFlag = DirtyFlag.Position;
+                    dirtyFlag = DirtyFlag.Transform;
                     //Console.WriteLine("Client {0} with UDP IP {1}:{2} has new pos of {3}, {4}, {5}", client.id, UDPEP.Address, UDPEP.Port, client.position[0], client.position[1], client.position[2]);
                     break;
                 default:
@@ -332,20 +362,40 @@ namespace Server {
                 IPEndPoint UDPEP = (IPEndPoint)tempClientInfo.UDPEndpoint;
                 Console.WriteLine("Client {0} on IP {1} with TCP port {2} and UDP port {3} has connected", tempClientInfo.id, TCPEP.Address, TCPEP.Port, UDPEP.Port);
 
+                tempClientInfo.name = "";
                 tempClientInfo.position = new float[] { 0f, 0f, 0f };
+                tempClientInfo.rotation = new float[] { 0f, 0f, 0f };
+                tempClientInfo.velocity = new float[] { 0f, 0f, 0f };
+                tempClientInfo.acceleration = new float[] { 0f, 0f, 0f };
 
                 //Tell new client what other clients exist on server
                 sendBuffer = new byte[8 + clientInfoList.Count * 16];
                 BufferSetup(sendBuffer, clientInfoList, true);
                 SendNetworkCallback(tempClientInfo, sendBuffer);
 
+                //Allow client to instantiate other clients
+                Thread.Sleep(50);
+
+                //Send names of all clients
+                foreach (ClientInfo curClient in clientInfoList) {
+                    sendBuffer = new byte[Math.Min(curClient.name.Length + 4, 64)];
+                    BufferSetup(sendBuffer, curClient.id, curClient.name);
+                    SendNetworkCallback(tempClientInfo, sendBuffer);
+                }
+
                 //Tell other clients new client joined
                 sendBuffer = new byte[16];
                 BufferSetup(sendBuffer, tempClientInfo);
                 SendNetworkCallback(clientInfoList, sendBuffer);
 
-                tempClientInfo.TCPSocket.BeginReceive(receiveBuffer, 0, receiveBuffer.Length, 0, new AsyncCallback(ReceiveTCPCallback), tempClientInfo.TCPSocket);
                 clientInfoList.Add(tempClientInfo);
+                tempClientInfo.TCPSocket.BeginReceive(receiveBuffer, 0, receiveBuffer.Length, 0, new AsyncCallback(ReceiveTCPCallback), tempClientInfo.TCPSocket);
+
+                //Tell client the setup is finished
+                sendBuffer = new byte[4];
+                BufferSetup(sendBuffer, tempClientInfo.id, false);
+                sendBuffer[2] = 1;
+                SendNetworkCallback(tempClientInfo, sendBuffer);
             }
             else if (tempClientInfo.TCPSocket != null) {
                 IPEndPoint TCPEP = (IPEndPoint)tempClientInfo.TCPSocket.RemoteEndPoint;
@@ -358,9 +408,13 @@ namespace Server {
 
 
             tempClientInfo.id = 0;
+            tempClientInfo.name = "";
             tempClientInfo.TCPSocket = null;
             tempClientInfo.UDPEndpoint = null;
             tempClientInfo.position = null;
+            tempClientInfo.rotation = null;
+            tempClientInfo.velocity = null;
+            tempClientInfo.acceleration = null;
 
             TCPSocket.BeginAccept(new AsyncCallback(AcceptCallback), null);
         }
@@ -385,11 +439,16 @@ namespace Server {
                 deltaTime = currentTime - previousTime;
                 previousTime = currentTime;
 
-                if ((dirtyFlag & DirtyFlag.Position) == 0)
+                if ((dirtyFlag & DirtyFlag.Transform) == DirtyFlag.Transform)
+                    curExtraSend = maxExtraSend;
+
+                if (curExtraSend == 0)
                     continue;
 
                 dirtyFlag = DirtyFlag.None;
-                byte[] sendBuffer = new byte[8 + clientInfoList.Count * 16];
+                --curExtraSend;
+
+                byte[] sendBuffer = new byte[8 + clientInfoList.Count * 48];
                 BufferSetup(sendBuffer, clientInfoList, false);
 
                 SendNetworkCallback(clientInfoList, sendBuffer);
@@ -415,11 +474,15 @@ namespace Server {
         }
 
         private static ClientInfo FindClient(Socket tcpSocket) {
-            ClientInfo client;
+            ClientInfo client = new ClientInfo();
             client.id = 0;
+            client.name = string.Empty;
             client.TCPSocket = null;
             client.UDPEndpoint = null;
             client.position = null;
+            client.rotation = null;
+            client.velocity = null;
+            client.acceleration = null;
 
             foreach (ClientInfo curClient in clientInfoList) {
                 if (curClient.TCPSocket == tcpSocket) {
@@ -432,11 +495,15 @@ namespace Server {
         }
 
         private static ClientInfo FindClient(byte clientId) {
-            ClientInfo client;
+            ClientInfo client = new ClientInfo();
             client.id = 0;
+            client.name = string.Empty;
             client.TCPSocket = null;
             client.UDPEndpoint = null;
             client.position = null;
+            client.rotation = null;
+            client.velocity = null;
+            client.acceleration = null;
 
             foreach (ClientInfo curClient in clientInfoList) {
                 if (curClient.id == clientId) {
@@ -446,6 +513,18 @@ namespace Server {
             }
 
             return client;
+        }
+
+        private static int FindClientIndex(byte clientId) {
+            int clientIndex = -1;
+            for (int index = 0; index < clientInfoList.Count; index++) {
+                if (clientInfoList[index].id == clientId) {
+                    clientIndex = index;
+                    break;
+                }
+            }
+
+            return clientIndex;
         }
 
         private static void BufferSetup(byte[] buffer, byte id, bool disconnect) {
@@ -461,11 +540,20 @@ namespace Server {
 
             int offset = 0;
             for (int index = 0; index < clientInfoList.Count; ++index) {
-                offset = index * 16;
+                offset = index * (useTCP ? 16 : 48);
                 buffer[8 + offset] = clientInfoList[index].id;
                 BitConverter.GetBytes(clientInfoList[index].position[0]).CopyTo(buffer, 12 + offset);
                 BitConverter.GetBytes(clientInfoList[index].position[1]).CopyTo(buffer, 16 + offset);
                 BitConverter.GetBytes(clientInfoList[index].position[2]).CopyTo(buffer, 20 + offset);
+
+                if (!useTCP) {
+                    BitConverter.GetBytes(clientInfoList[index].velocity[0]).CopyTo(buffer, 24 + offset);
+                    BitConverter.GetBytes(clientInfoList[index].velocity[1]).CopyTo(buffer, 28 + offset);
+                    BitConverter.GetBytes(clientInfoList[index].velocity[2]).CopyTo(buffer, 32 + offset);
+                    BitConverter.GetBytes(clientInfoList[index].acceleration[0]).CopyTo(buffer, 36 + offset);
+                    BitConverter.GetBytes(clientInfoList[index].acceleration[1]).CopyTo(buffer, 40 + offset);
+                    BitConverter.GetBytes(clientInfoList[index].acceleration[2]).CopyTo(buffer, 44 + offset);
+                }
             }
         }
 
@@ -476,6 +564,13 @@ namespace Server {
             BitConverter.GetBytes(clientInfo.position[0]).CopyTo(buffer, 4);
             BitConverter.GetBytes(clientInfo.position[1]).CopyTo(buffer, 8);
             BitConverter.GetBytes(clientInfo.position[2]).CopyTo(buffer, 12);
+        }
+
+        private static void BufferSetup(byte[] buffer, byte id, string clientName) {
+            //Send Pos, TCP
+            buffer[0] = (byte)ClientNetworkCalls.TCPSetClientName;
+            buffer[1] = id;
+            Encoding.ASCII.GetBytes(clientName, 0, clientName.Length, buffer, 4);
         }
     }
 }

@@ -12,7 +12,8 @@ public enum ConnectionType {
 }
 
 public enum ServerNetworkCalls : byte {
-    TCPClientMessage = 0,
+    TCPSetClientName = 0,
+    TCPClientMessage = 1,
     UDPClientConnection = 0 + 0x10,
     UDPClientTransform = 1 + 0x10
 }
@@ -22,16 +23,23 @@ public enum ClientNetworkCalls : byte {
     TCPClientDisconnection = 1,
     TCPClientTransform = 2,
     TCPClientsTransform = 3,
-    TCPClientMessage = 4,
+    TCPSetClientName = 4,
+    TCPClientMessage = 5,
     UDPClientsTransform = 0 + 0x10
 }
 
 public class OnlineSyncController : MonoBehaviour {
     public ConnectionType typeA; //No good and descritptive name?? Amazing
     public byte clientId = 0;
+    public string clientName = "";
 
-    private Vector3 position = Vector3.up;
-    private Vector3 oldPosition = Vector3.down;
+    private Vector3 position = Vector3.zero;
+    private Vector3 positionPrev = Vector3.zero;
+    private Vector3 velocity = Vector3.zero;
+    private Vector3 velocityPrev = Vector3.zero;
+    private Vector3 acceleration = Vector3.zero;
+    private float lastTimePosRecieved = -1f;
+    private float maxVelocity = -1f;
     private bool StartedCoroutine = false;
 
     public static bool ConnectingToServer = false;
@@ -45,6 +53,7 @@ public class OnlineSyncController : MonoBehaviour {
 
     private void Start() {
         position = transform.position;
+        maxVelocity = GameController.instance.player.GetComponent<PlayerController>().velocity * 1.5f;
     }
 
     private void FixedUpdate() {
@@ -56,15 +65,13 @@ public class OnlineSyncController : MonoBehaviour {
 
     private void Update() {
         if (typeA == ConnectionType.Recieve) {
-            oldPosition = transform.position;
-            transform.position = position;
-        }
-    }
+            float timeElapsedSincePosRecieved = (lastTimePosRecieved == -1f ? 0f : Time.unscaledTime - lastTimePosRecieved);
+            Vector3 targetPos = Vector3.Lerp(positionPrev, position, 0.75f) + velocity * timeElapsedSincePosRecieved + acceleration * timeElapsedSincePosRecieved * timeElapsedSincePosRecieved;
+            Vector3 targetVel = (targetPos - transform.position);
+            if (targetVel.magnitude > maxVelocity * Time.unscaledDeltaTime)
+                targetVel = targetVel.normalized * maxVelocity * Time.unscaledDeltaTime;
 
-    private void LateUpdate() {
-        if (typeA == ConnectionType.Send) {
-            oldPosition = position;
-            position = transform.position;
+            transform.Translate(targetVel);
         }
     }
 
@@ -227,6 +234,9 @@ public class OnlineSyncController : MonoBehaviour {
 
                 GameController.instance.AddCommand(data);
                 break;
+            case ClientNetworkCalls.TCPSetClientName:
+                GameController.instance.AddCommand(data);
+                break;
             case ClientNetworkCalls.TCPClientMessage:
                 GameController.instance.AddCommand(data);
                 break;
@@ -258,7 +268,7 @@ public class OnlineSyncController : MonoBehaviour {
         //First byte indicates the type of data sent
         switch ((ClientNetworkCalls)data[0]) {
             case ClientNetworkCalls.UDPClientsTransform:
-                if (bufferLength != (8 + BitConverter.ToInt32(data, 4) * 16)) {
+                if (bufferLength != (8 + BitConverter.ToInt32(data, 4) * 48)) {
                     Debug.Log("Incorrect Buffer Length");
                     break;
                 }
@@ -300,48 +310,69 @@ public class OnlineSyncController : MonoBehaviour {
     }
 
     private IEnumerator SendPosition() {
-        byte[] sendBuffer = new byte[16];
+        byte[] sendBuffer = new byte[40];
 
         bool running = true;
-        int firstRuns = 0;
-        float previousTime = Time.time;
+        int maxExtraSend = 10;
+        int curExtraSend = maxExtraSend;
+        float previousTime = Time.unscaledTime;
         float timeWait = 1f / 20f;
         float deltaTime = 0f;
 
         while (running) {
             //Find the amount of time that has passed since this function was last called
-            float workTime = Time.time - previousTime;
+            float workTime = Time.unscaledTime - previousTime;
 
             //If the amount of time that has passed is smaller than the time to wait it'll find out how long it needs to wait and stop the program from running for a certain amoount of time
             if (workTime < timeWait)
                 yield return new WaitForSeconds(timeWait - workTime);
 
             //Gets deltaTime by looking at difference of current time and previous time
-            deltaTime = Time.time - previousTime;
-            previousTime = Time.time;
+            deltaTime = Time.unscaledTime - previousTime;
+            previousTime = Time.unscaledTime;
 
             //Wait for start of new frame
             yield return null;
 
-            if (Vector3.Distance(position, oldPosition) < 0.01f && firstRuns > 3)
+            positionPrev = position;
+            position = transform.position;
+            velocityPrev = velocity;
+            velocity = position - positionPrev;
+            acceleration = velocity - velocityPrev;
+
+            if (Vector3.Distance(position, positionPrev) > 0.001f)
+                curExtraSend = maxExtraSend;
+
+            if (curExtraSend == 0)
                 continue;
+            
+            --curExtraSend;
 
-            if (firstRuns < 5)
-                ++firstRuns;
-
-            BufferSetup(sendBuffer, clientId, position);
+            BufferSetup(sendBuffer, clientId, position, velocity, acceleration);
 
             SendNetworkCallback(sendBuffer);
         }
     }
 
-    public void SetPosition(Vector3 pos) {
+    public void SetTransform(Vector3 pos, Vector3 vel, Vector3 accel) {
+        positionPrev = transform.position;
+
         position = pos;
+        velocity = vel;
+        acceleration = accel;
+
+        lastTimePosRecieved = Time.unscaledTime;
     }
 
     public static void SendMessageToServer(byte id, string message) {
         byte[] sendBuffer = new byte[Math.Min(message.Length + 4, 512)];
-        BufferSetup(sendBuffer, id, message);
+        BufferSetup(sendBuffer, id, false, message);
+        SendNetworkCallback(sendBuffer);
+    }
+
+    public static void SetClientName(byte id, string name) {
+        byte[] sendBuffer = new byte[Math.Min(name.Length + 4, 64)];
+        BufferSetup(sendBuffer, id, true, name);
         SendNetworkCallback(sendBuffer);
     }
 
@@ -351,18 +382,24 @@ public class OnlineSyncController : MonoBehaviour {
         buffer[1] = id;
     }
 
-    private static void BufferSetup(byte[] buffer, byte id, Vector3 pos) {
+    private static void BufferSetup(byte[] buffer, byte id, Vector3 pos, Vector3 vel, Vector3 accel) {
         //Send pos, UDP
         buffer[0] = (byte)ServerNetworkCalls.UDPClientTransform;
         buffer[1] = id;
         BitConverter.GetBytes(pos.x).CopyTo(buffer, 4);
         BitConverter.GetBytes(pos.y).CopyTo(buffer, 8);
         BitConverter.GetBytes(pos.z).CopyTo(buffer, 12);
+        BitConverter.GetBytes(vel.x).CopyTo(buffer, 16);
+        BitConverter.GetBytes(vel.y).CopyTo(buffer, 20);
+        BitConverter.GetBytes(vel.z).CopyTo(buffer, 24);
+        BitConverter.GetBytes(accel.x).CopyTo(buffer, 28);
+        BitConverter.GetBytes(accel.y).CopyTo(buffer, 32);
+        BitConverter.GetBytes(accel.z).CopyTo(buffer, 36);
     }
 
-    private static void BufferSetup(byte[] buffer, byte id, string message) {
+    private static void BufferSetup(byte[] buffer, byte id, bool isNameChange, string message) {
         //Send message, TCP
-        buffer[0] = (byte)ServerNetworkCalls.TCPClientMessage;
+        buffer[0] = isNameChange ? (byte)ServerNetworkCalls.TCPSetClientName : (byte)ServerNetworkCalls.TCPClientMessage;
         buffer[1] = id;
         Encoding.ASCII.GetBytes(message, 0, message.Length, buffer, 4);
     }

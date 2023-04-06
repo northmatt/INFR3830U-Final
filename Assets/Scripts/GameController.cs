@@ -73,6 +73,13 @@ public class GameController : MonoBehaviour {
         OnlineSyncController.SendMessageToServer(player.clientId, message);
     }
 
+    public void SetPlayerName(string name) {
+        if (name == "")
+            return;
+
+        OnlineSyncController.SetClientName(player.clientId, name);
+    }
+
     private void ExecuteOSCCommands() {
         int executeCount = 0;
         while (receiveBufferCommands.Count > 0 && executeCount < 50) {
@@ -87,12 +94,18 @@ public class GameController : MonoBehaviour {
                         continue;
                     }
 
-                    player.clientId = newCommand[1];
+                    if (newCommand[2] == 0)
+                        player.clientId = newCommand[1];
+                    else
+                        SetPlayerName("Client " + player.clientId.ToString());
+
                     break;
                 case ClientNetworkCalls.TCPClientDisconnection:
                     foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
-                        if (curOSC.typeA == ConnectionType.Recieve && curOSC.clientId == newCommand[1])
+                        if (curOSC.typeA == ConnectionType.Recieve && curOSC.clientId == newCommand[1]) {
                             Destroy(curOSC.gameObject);
+                            break;
+                        }
                     }
                     break;
                 case ClientNetworkCalls.TCPClientTransform:
@@ -108,18 +121,31 @@ public class GameController : MonoBehaviour {
                         Instantiate(enemyPrefab, newPos1, Quaternion.identity, entityList).GetComponent<OnlineSyncController>().clientId = newCommand[8 + offset1];
                     }
                     break;
+                case ClientNetworkCalls.TCPSetClientName:
+                    foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
+                        if (curOSC.clientId == newCommand[1]) {
+                            curOSC.clientName = Encoding.ASCII.GetString(newCommand, 4, newCommand.Length - 4);
+                            break;
+                        }
+                    }
+                    break;
                 case ClientNetworkCalls.TCPClientMessage:
-                    string message = Encoding.ASCII.GetString(newCommand, 4, newCommand.Length - 4);
-                    message = "C" + newCommand[1] + ": " + message + "\n";
-                    messageField.text += message;
+                    foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
+                        if (curOSC.clientId == newCommand[1]) {
+                            messageField.text += curOSC.clientName + ": " + Encoding.ASCII.GetString(newCommand, 4, newCommand.Length - 4) + "\n";
+                            break;
+                        }
+                    }
                     break;
                 case ClientNetworkCalls.UDPClientsTransform:
                     int offset2 = 0;
                     for (int index = 0; index < BitConverter.ToInt32(newCommand, 4); ++index) {
-                        offset2 = index * 16;
+                        offset2 = index * 48;
                         foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
                             if (curOSC.typeA == ConnectionType.Recieve && curOSC.clientId == newCommand[8 + offset2])
-                                curOSC.SetPosition(new Vector3(BitConverter.ToSingle(newCommand, 12 + offset2), BitConverter.ToSingle(newCommand, 16 + offset2), BitConverter.ToSingle(newCommand, 20 + offset2)));
+                                curOSC.SetTransform(new Vector3(BitConverter.ToSingle(newCommand, 12 + offset2), BitConverter.ToSingle(newCommand, 16 + offset2), BitConverter.ToSingle(newCommand, 20 + offset2)),
+                                                    new Vector3(BitConverter.ToSingle(newCommand, 24 + offset2), BitConverter.ToSingle(newCommand, 28 + offset2), BitConverter.ToSingle(newCommand, 32 + offset2)),
+                                                    new Vector3(BitConverter.ToSingle(newCommand, 36 + offset2), BitConverter.ToSingle(newCommand, 40 + offset2), BitConverter.ToSingle(newCommand, 44 + offset2)));
                         }
                     }
                     break;
@@ -145,7 +171,7 @@ public class GameController : MonoBehaviour {
         gamePaused = isPaused;
         CursorHidden(!gamePaused);
 
-        Time.timeScale = isPaused ? 0f : 1f;
+        //Time.timeScale = isPaused ? 0f : 1f;
     }
 
     public void CursorHidden(bool isHidden) {

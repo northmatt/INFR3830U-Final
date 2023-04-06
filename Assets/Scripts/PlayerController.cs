@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 public class PlayerController : MonoBehaviour {
-    public float moveSpeed = 3f;
+    public float velocity = 3f;
     public TMPro.TMP_Text messageField;
     public TMPro.TMP_InputField inputField;
 
@@ -13,10 +13,14 @@ public class PlayerController : MonoBehaviour {
         GameController.instance.messageField = messageField;
         GameController.instance.inputField = inputField;
 
-        inputField.onSubmit.AddListener((string input) => { GameController.instance.SendServerMessage(input); });
+        if (inputField) {
+            inputField.onSubmit.AddListener((string input) => { GameController.instance.SendServerMessage(input); });
+            inputField.DeactivateInputField(true);
+        }
     }
 
     void Update() {
-        transform.Translate(Input.GetAxisRaw("Horizontal") * moveSpeed * Time.deltaTime, 0f, Input.GetAxisRaw("Vertical") * moveSpeed * Time.deltaTime);
+        if (!GameController.instance.gamePaused)
+            transform.Translate(new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical")).normalized * velocity * Time.deltaTime);
     }
 }
