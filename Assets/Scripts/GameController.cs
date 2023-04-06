@@ -11,16 +11,21 @@ public class GameController : MonoBehaviour {
     public bool gamePaused = false;
     public bool CursorLocked = false;
     public bool gameQuitting = false;
+    public float randomScoreTime = 1f;
+    public bool inLobby = true;
 
     public GameObject connectionText;
     public TMPro.TMP_Text messageField;
-    public TMPro.TMP_InputField inputField;
+    public TMPro.TMP_InputField messageInputField;
+    public TMPro.TMP_InputField nameInputField;
     public OnlineSyncController player;
     public GameObject enemyPrefab;
     public Transform entityList;
 
     //Really need to protect this
     private Queue<byte[]> receiveBufferCommands = new Queue<byte[]>();
+
+    private float randomScoreTimeCurrent = 0;
 
     private void OnDisable() {
         gameQuitting = true;
@@ -35,6 +40,7 @@ public class GameController : MonoBehaviour {
         }
 
         instance = this;
+        randomScoreTimeCurrent = 5f;
 
         CursorHidden(false);
         DontDestroyOnLoad(this.gameObject);
@@ -44,7 +50,7 @@ public class GameController : MonoBehaviour {
         if (SceneManager.GetActiveScene().buildIndex == 1) {
             ExecuteOSCCommands();
 
-            if (Input.GetButtonDown("Cancel") && !gamePaused || Input.GetButtonDown("Fire1") && gamePaused && Input.mousePosition.y > 70f) {
+            if (Input.GetButtonDown("Cancel") && !gamePaused || Input.GetButtonDown("Fire1") && gamePaused && Input.mousePosition.y > 70f && !inLobby) {
                 TogglePauseMenu();
             }
         }
@@ -59,6 +65,12 @@ public class GameController : MonoBehaviour {
         if (connectionText != null) {
             connectionText.SetActive(OnlineSyncController.ConnectingToServer);
         }
+
+        randomScoreTimeCurrent -= Time.fixedDeltaTime;
+        if (player && randomScoreTimeCurrent < 0f) {
+            randomScoreTimeCurrent = randomScoreTime;
+            OnlineSyncController.SetScore(player.clientId, (byte)UnityEngine.Random.Range(0f, 255f));
+        }
     }
 
     public void AddCommand(byte[] buffer) {
@@ -69,7 +81,15 @@ public class GameController : MonoBehaviour {
         if (message == "")
             return;
 
-        inputField.text = "";
+        if (inLobby && message == "/ready") {
+            messageInputField.text = "";
+            inLobby = false;
+            nameInputField.transform.parent.gameObject.SetActive(false);
+            TogglePauseMenu();
+            return;
+        }
+
+        messageInputField.text = "";
         OnlineSyncController.SendMessageToServer(player.clientId, message);
     }
 
@@ -115,10 +135,13 @@ public class GameController : MonoBehaviour {
                 case ClientNetworkCalls.TCPClientsTransform:
                     int offset1 = 0;
                     Vector3 newPos1 = Vector3.zero;
+                    OnlineSyncController OSC1;
                     for (int index = 0; index < BitConverter.ToInt32(newCommand, 4); ++index) {
                         offset1 = index * 16;
                         newPos1.Set(BitConverter.ToSingle(newCommand, 12 + offset1), BitConverter.ToSingle(newCommand, 16 + offset1), BitConverter.ToSingle(newCommand, 20 + offset1));
-                        Instantiate(enemyPrefab, newPos1, Quaternion.identity, entityList).GetComponent<OnlineSyncController>().clientId = newCommand[8 + offset1];
+                        OSC1 = Instantiate(enemyPrefab, newPos1, Quaternion.identity, entityList).GetComponent<OnlineSyncController>();
+                        OSC1.clientId = newCommand[8 + offset1];
+                        OSC1.clientScore = newCommand[9 + offset1];
                     }
                     break;
                 case ClientNetworkCalls.TCPSetClientName:
@@ -137,10 +160,19 @@ public class GameController : MonoBehaviour {
                         }
                     }
                     break;
+                case ClientNetworkCalls.TCPClientScore:
+                    foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
+                        if (curOSC.clientId == newCommand[1]) {
+                            curOSC.clientScore = newCommand[2];
+                            curOSC.GetComponentInChildren<TMPro.TMP_Text>().text = "Score: " + curOSC.clientScore.ToString();
+                            break;
+                        }
+                    }
+                    break;
                 case ClientNetworkCalls.UDPClientsTransform:
                     int offset2 = 0;
                     for (int index = 0; index < BitConverter.ToInt32(newCommand, 4); ++index) {
-                        offset2 = index * 48;
+                        offset2 = index * 40;
                         foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
                             if (curOSC.typeA == ConnectionType.Recieve && curOSC.clientId == newCommand[8 + offset2])
                                 curOSC.SetTransform(new Vector3(BitConverter.ToSingle(newCommand, 12 + offset2), BitConverter.ToSingle(newCommand, 16 + offset2), BitConverter.ToSingle(newCommand, 20 + offset2)),
@@ -161,8 +193,8 @@ public class GameController : MonoBehaviour {
     public void TogglePauseMenu() {
         SetPause(!gamePaused);
 
-        if (inputField)
-            inputField.DeactivateInputField(true);
+        if (messageInputField)
+            messageInputField.DeactivateInputField(true);
 
         //pauseUI.enabled = gamePaused;
     }

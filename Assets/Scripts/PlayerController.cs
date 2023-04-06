@@ -5,18 +5,28 @@ using UnityEngine;
 public class PlayerController : MonoBehaviour {
     public float velocity = 3f;
     public TMPro.TMP_Text messageField;
-    public TMPro.TMP_InputField inputField;
+    public TMPro.TMP_InputField messageInputField;
+    public TMPro.TMP_InputField nameInputField;
 
     private void Start() {
         GameController.instance.player = GetComponent<OnlineSyncController>();
         GameController.instance.entityList = transform.parent;
         GameController.instance.messageField = messageField;
-        GameController.instance.inputField = inputField;
+        GameController.instance.messageInputField = messageInputField;
+        GameController.instance.nameInputField = nameInputField;
 
-        if (inputField) {
-            inputField.onSubmit.AddListener((string input) => { GameController.instance.SendServerMessage(input); });
-            inputField.DeactivateInputField(true);
+        if (messageInputField) {
+            messageInputField.onSubmit.AddListener((string input) => { GameController.instance.SendServerMessage(input); });
+            messageInputField.DeactivateInputField(true);
         }
+
+        if (nameInputField) {
+            nameInputField.onSubmit.AddListener((string input) => { GameController.instance.SetPlayerName(input); });
+            nameInputField.DeactivateInputField(true);
+        }
+
+        if (!GameController.instance.gamePaused)
+            GameController.instance.TogglePauseMenu();
     }
 
     void Update() {

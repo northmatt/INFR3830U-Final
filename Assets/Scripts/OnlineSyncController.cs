@@ -14,6 +14,7 @@ public enum ConnectionType {
 public enum ServerNetworkCalls : byte {
     TCPSetClientName = 0,
     TCPClientMessage = 1,
+    TCPClientScore = 2,
     UDPClientConnection = 0 + 0x10,
     UDPClientTransform = 1 + 0x10
 }
@@ -25,6 +26,7 @@ public enum ClientNetworkCalls : byte {
     TCPClientsTransform = 3,
     TCPSetClientName = 4,
     TCPClientMessage = 5,
+    TCPClientScore = 6,
     UDPClientsTransform = 0 + 0x10
 }
 
@@ -32,6 +34,7 @@ public class OnlineSyncController : MonoBehaviour {
     public ConnectionType typeA; //No good and descritptive name?? Amazing
     public byte clientId = 0;
     public string clientName = "";
+    public byte clientScore = 0;
 
     private Vector3 position = Vector3.zero;
     private Vector3 positionPrev = Vector3.zero;
@@ -240,6 +243,9 @@ public class OnlineSyncController : MonoBehaviour {
             case ClientNetworkCalls.TCPClientMessage:
                 GameController.instance.AddCommand(data);
                 break;
+            case ClientNetworkCalls.TCPClientScore:
+                GameController.instance.AddCommand(data);
+                break;
             default:
                 break;
         }
@@ -268,7 +274,7 @@ public class OnlineSyncController : MonoBehaviour {
         //First byte indicates the type of data sent
         switch ((ClientNetworkCalls)data[0]) {
             case ClientNetworkCalls.UDPClientsTransform:
-                if (bufferLength != (8 + BitConverter.ToInt32(data, 4) * 48)) {
+                if (bufferLength != (8 + BitConverter.ToInt32(data, 4) * 40)) {
                     Debug.Log("Incorrect Buffer Length");
                     break;
                 }
@@ -376,6 +382,12 @@ public class OnlineSyncController : MonoBehaviour {
         SendNetworkCallback(sendBuffer);
     }
 
+    public static void SetScore(byte id, byte score) {
+        byte[] sendBuffer = new byte[4];
+        BufferSetup(sendBuffer, id, score);
+        SendNetworkCallback(sendBuffer);
+    }
+
     private static void BufferSetup(byte[] buffer, byte id) {
         //Initial connection with ID, UDP
         buffer[0] = (byte)ServerNetworkCalls.UDPClientConnection;
@@ -402,5 +414,11 @@ public class OnlineSyncController : MonoBehaviour {
         buffer[0] = isNameChange ? (byte)ServerNetworkCalls.TCPSetClientName : (byte)ServerNetworkCalls.TCPClientMessage;
         buffer[1] = id;
         Encoding.ASCII.GetBytes(message, 0, message.Length, buffer, 4);
+    }
+
+    private static void BufferSetup(byte[] buffer, byte id, byte score) {
+        buffer[0] = (byte)ServerNetworkCalls.TCPClientScore;
+        buffer[1] = id;
+        buffer[2] = score;
     }
 }

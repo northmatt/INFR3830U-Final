@@ -271,8 +271,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   gamePaused: 0
   CursorLocked: 0
+  gameQuitting: 0
+  randomScoreTime: 2
   connectionText: {fileID: 1003957708}
-  MessageText: {fileID: 0}
+  messageField: {fileID: 0}
+  inputField: {fileID: 0}
   player: {fileID: 0}
   enemyPrefab: {fileID: 1897500656672035615, guid: 557e0b31a419aaf42a42039e1779a9c0, type: 3}
   entityList: {fileID: 0}
