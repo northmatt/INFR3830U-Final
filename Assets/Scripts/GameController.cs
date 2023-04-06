@@ -67,7 +67,7 @@ public class GameController : MonoBehaviour {
         }
 
         randomScoreTimeCurrent -= Time.fixedDeltaTime;
-        if (player && randomScoreTimeCurrent < 0f) {
+        if (!inLobby && player && randomScoreTimeCurrent < 0f) {
             randomScoreTimeCurrent = randomScoreTime;
             OnlineSyncController.SetScore(player.clientId, (byte)UnityEngine.Random.Range(0f, 255f));
         }
@@ -116,8 +116,12 @@ public class GameController : MonoBehaviour {
 
                     if (newCommand[2] == 0)
                         player.clientId = newCommand[1];
-                    else
+                    else if (newCommand[2] == 1 && player.clientId == newCommand[1]) {
                         SetPlayerName("Client " + player.clientId.ToString());
+                    }
+                    else {
+                        OnlineSyncController.SendMessageToServer(0, "Error: " + player.clientId.ToString() + ", " + newCommand[0].ToString() + ", " + newCommand[1].ToString() + ", " + newCommand[2].ToString() + ", " + newCommand[3].ToString() + "\n");
+                    }
 
                     break;
                 case ClientNetworkCalls.TCPClientDisconnection:

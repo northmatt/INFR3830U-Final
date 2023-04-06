@@ -161,7 +161,7 @@ namespace Server {
 
                 //Tell other clients about disconnection
                 byte[] sendBuffer = new byte[4];
-                BufferSetup(sendBuffer, client.id, true);
+                BufferSetup(sendBuffer, client.id, true, false);
                 SendNetworkCallback(clientInfoList, sendBuffer);
             }
             catch (System.Exception exc) {
@@ -254,7 +254,7 @@ namespace Server {
 
                     ClientInfo client2 = FindClient(data[1]);
                     if (client2.TCPSocket == null) {
-                        Console.WriteLine("Cant set score , client {0} not found", data[1]);
+                        Console.WriteLine("Cant set score, client {0} not found", data[1]);
                         break;
                     }
                     client2.score[0] = data[2];
@@ -359,7 +359,7 @@ namespace Server {
         private static void SetupClientInfo() {
             //Establish a TCP and UDP connection to get TCP/UDP ports of a client
             byte[] sendBuffer = new byte[4];
-            BufferSetup(sendBuffer, FindLowestAvailableClientID(), false);
+            BufferSetup(sendBuffer, FindLowestAvailableClientID(), false, false);
             SendNetworkCallback(tempClientInfo, sendBuffer);
 
             tempClientInfo.id = sendBuffer[1];
@@ -378,7 +378,7 @@ namespace Server {
                 IPEndPoint UDPEP = (IPEndPoint)tempClientInfo.UDPEndpoint;
                 Console.WriteLine("Client {0} on IP {1} with TCP port {2} and UDP port {3} has connected", tempClientInfo.id, TCPEP.Address, TCPEP.Port, UDPEP.Port);
 
-                tempClientInfo.name = new string[] { "" };
+                tempClientInfo.name = new string[] { "C" };
                 tempClientInfo.position = new float[] { 0f, 0f, 0f };
                 tempClientInfo.rotation = new float[] { 0f, 0f, 0f };
                 tempClientInfo.velocity = new float[] { 0f, 0f, 0f };
@@ -390,14 +390,14 @@ namespace Server {
                 BufferSetup(sendBuffer, clientInfoList, true);
                 SendNetworkCallback(tempClientInfo, sendBuffer);
 
-                //Allow client to instantiate other clients
-                Thread.Sleep(50);
+                Thread.Sleep(100);
 
                 //Send names of all clients
                 foreach (ClientInfo curClient in clientInfoList) {
                     sendBuffer = new byte[Math.Min(curClient.name[0].Length + 4, 64)];
                     BufferSetup(sendBuffer, curClient.id, curClient.name[0]);
                     SendNetworkCallback(tempClientInfo, sendBuffer);
+                    Thread.Sleep(50);
                 }
 
                 //Tell other clients new client joined
@@ -408,10 +408,11 @@ namespace Server {
                 clientInfoList.Add(tempClientInfo);
                 tempClientInfo.TCPSocket.BeginReceive(receiveBuffer, 0, receiveBuffer.Length, 0, new AsyncCallback(ReceiveTCPCallback), tempClientInfo.TCPSocket);
 
+                Thread.Sleep(100);
+
                 //Tell client the setup is finished
                 sendBuffer = new byte[4];
-                BufferSetup(sendBuffer, tempClientInfo.id, false);
-                sendBuffer[2] = 1;
+                BufferSetup(sendBuffer, tempClientInfo.id, false, true);
                 SendNetworkCallback(tempClientInfo, sendBuffer);
             }
             else if (tempClientInfo.TCPSocket != null) {
@@ -535,10 +536,11 @@ namespace Server {
             return client;
         }
 
-        private static void BufferSetup(byte[] buffer, byte id, bool disconnect) {
+        private static void BufferSetup(byte[] buffer, byte id, bool disconnect, bool finishSetup) {
             //(dis)connection with ID, TCP
             buffer[0] = disconnect ? (byte)ClientNetworkCalls.TCPClientDisconnection : (byte)ClientNetworkCalls.TCPClientConnection;
             buffer[1] = id;
+            buffer[2] = finishSetup ? (byte)1 : (byte)0;
         }
 
         private static void BufferSetup(byte[] buffer, List<ClientInfo> clientInfoList, bool useTCP) {

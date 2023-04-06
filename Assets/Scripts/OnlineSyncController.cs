@@ -57,6 +57,7 @@ public class OnlineSyncController : MonoBehaviour {
     private void Start() {
         position = transform.position;
         maxVelocity = GameController.instance.player.GetComponent<PlayerController>().velocity * 1.5f;
+        clientName = "C";
     }
 
     private void FixedUpdate() {
