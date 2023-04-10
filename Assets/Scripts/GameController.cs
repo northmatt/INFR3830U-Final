@@ -18,8 +18,10 @@ public class GameController : MonoBehaviour {
     public TMPro.TMP_Text messageField;
     public TMPro.TMP_InputField messageInputField;
     public TMPro.TMP_InputField nameInputField;
+    public Transform playerLobbyInfoPanel;
     public OnlineSyncController player;
     public GameObject enemyPrefab;
+    public GameObject playerLobbyInfoPrefab;
     public Transform entityList;
 
     //Really need to protect this
@@ -71,6 +73,9 @@ public class GameController : MonoBehaviour {
             randomScoreTimeCurrent = randomScoreTime;
             OnlineSyncController.SetScore(player.clientId, (byte)UnityEngine.Random.Range(0f, 255f));
         }
+
+        if (inLobby && player && playerLobbyInfoPanel)
+            LobbyLogic();
     }
 
     public void AddCommand(byte[] buffer) {
@@ -83,9 +88,7 @@ public class GameController : MonoBehaviour {
 
         if (inLobby && message == "/ready") {
             messageInputField.text = "";
-            inLobby = false;
-            nameInputField.transform.parent.gameObject.SetActive(false);
-            TogglePauseMenu();
+            OnlineSyncController.SetScore(player.clientId, player.clientScore == 0 ? (byte)1 : (byte)0);
             return;
         }
 
@@ -173,6 +176,11 @@ public class GameController : MonoBehaviour {
                         }
                     }
                     break;
+                case ClientNetworkCalls.TCPDelobby:
+                    inLobby = false;
+                    nameInputField.transform.parent.gameObject.SetActive(false);
+                    TogglePauseMenu();
+                    break;
                 case ClientNetworkCalls.UDPClientsTransform:
                     int offset2 = 0;
                     for (int index = 0; index < BitConverter.ToInt32(newCommand, 4); ++index) {
@@ -214,6 +222,32 @@ public class GameController : MonoBehaviour {
         CursorLocked = isHidden;
         Cursor.lockState = CursorLocked ? CursorLockMode.Locked : CursorLockMode.None;
         Cursor.visible = !CursorLocked;
+    }
+
+    private void LobbyLogic() {
+        foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
+            Transform curPanel = playerLobbyInfoPanel.Find(curOSC.clientId.ToString());
+            if (curPanel) {
+                curPanel.Find("Status").GetComponent<UnityEngine.UI.Image>().color = curOSC.clientScore == 1 ? Color.green : Color.red;
+                curPanel.Find("Name").GetComponent<TMPro.TMP_Text>().text = curOSC.clientName;
+            }
+            else {
+                Instantiate(playerLobbyInfoPrefab, playerLobbyInfoPanel).name = curOSC.clientId.ToString();
+            }
+        }
+
+        foreach (Transform curPanel in playerLobbyInfoPanel) {
+            bool foundMatch = false;
+            foreach (OnlineSyncController curOSC in entityList.GetComponentsInChildren<OnlineSyncController>()) {
+                if (curPanel.name == curOSC.clientId.ToString()) {
+                    foundMatch = true;
+                    break;
+                }
+            }
+
+            if (!foundMatch)
+                Destroy(curPanel.gameObject);
+        }
     }
 
     public static void QuitGame() {

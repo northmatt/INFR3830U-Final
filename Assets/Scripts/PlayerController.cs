@@ -7,6 +7,7 @@ public class PlayerController : MonoBehaviour {
     public TMPro.TMP_Text messageField;
     public TMPro.TMP_InputField messageInputField;
     public TMPro.TMP_InputField nameInputField;
+    public Transform playerLobbyInfoPanel;
 
     private void Start() {
         GameController.instance.player = GetComponent<OnlineSyncController>();
@@ -14,6 +15,7 @@ public class PlayerController : MonoBehaviour {
         GameController.instance.messageField = messageField;
         GameController.instance.messageInputField = messageInputField;
         GameController.instance.nameInputField = nameInputField;
+        GameController.instance.playerLobbyInfoPanel = playerLobbyInfoPanel;
 
         if (messageInputField) {
             messageInputField.onSubmit.AddListener((string input) => { GameController.instance.SendServerMessage(input); });

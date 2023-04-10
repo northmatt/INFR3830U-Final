@@ -42,20 +42,20 @@ namespace Server {
         TCPSetClientName = 4,
         TCPClientMessage = 5,
         TCPClientScore = 6,
+        TCPDelobby = 7,
         UDPClientsTransform = 0 + 0x10
     }
 
     class Program {
+        private static bool acceptClients = true;
+        private static bool shutdownServer = false;
         private static byte[] receiveBuffer = new byte[1024];
         private static Socket TCPSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         private static Socket UDPSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         private static EndPoint UDPReceiveEndPoint;
         private static ClientInfo tempClientInfo;
         private static List<ClientInfo> clientInfoList = new List<ClientInfo>();
-        private static bool shutdownServer = false;
         private static DirtyFlag dirtyFlag = DirtyFlag.None;
-        private static int maxExtraSend = 10;
-        private static int curExtraSend = 0;
 
         static void Main(string[] args) {
             StartServer("127.0.0.1", 8888);
@@ -373,7 +373,7 @@ namespace Server {
 
             Thread.Sleep(100);
 
-            if (tempClientInfo.TCPSocket != null && tempClientInfo.UDPEndpoint != null) {
+            if (tempClientInfo.TCPSocket != null && tempClientInfo.UDPEndpoint != null && acceptClients) {
                 IPEndPoint TCPEP = (IPEndPoint)tempClientInfo.TCPSocket.RemoteEndPoint;
                 IPEndPoint UDPEP = (IPEndPoint)tempClientInfo.UDPEndpoint;
                 Console.WriteLine("Client {0} on IP {1} with TCP port {2} and UDP port {3} has connected", tempClientInfo.id, TCPEP.Address, TCPEP.Port, UDPEP.Port);
@@ -415,9 +415,13 @@ namespace Server {
                 BufferSetup(sendBuffer, tempClientInfo.id, false, true);
                 SendNetworkCallback(tempClientInfo, sendBuffer);
             }
-            else if (tempClientInfo.TCPSocket != null) {
+            else if (tempClientInfo.TCPSocket != null && tempClientInfo.UDPEndpoint == null) {
                 IPEndPoint TCPEP = (IPEndPoint)tempClientInfo.TCPSocket.RemoteEndPoint;
                 Console.WriteLine("Client {0} with TCP IP {1}:{2} failed to make a UDP connection", tempClientInfo.id, TCPEP.Address, TCPEP.Port);
+                DisconnectClient(tempClientInfo);
+            }
+            else if (tempClientInfo.TCPSocket != null && !acceptClients) {
+                Console.WriteLine("Game running, rejecting client");
                 DisconnectClient(tempClientInfo);
             }
             else {
@@ -441,8 +445,10 @@ namespace Server {
         private static void SendLoop() {
             long currentTime = 0;
             long previousTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-            long timeWait = 1000 / 20 - 4; //Windows scheduler cant really wait that accurately
+            long timeWait = 1000 / 20 - 4; //Windows scheduler is weird, so offset it to wait ~50ms
             long deltaTime = 0;
+            int maxExtraSend = 10;
+            int curExtraSend = 0;
 
             while (!shutdownServer) {
                 currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
@@ -457,6 +463,29 @@ namespace Server {
                 currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
                 deltaTime = currentTime - previousTime;
                 previousTime = currentTime;
+
+                if (acceptClients && clientInfoList.Count > 0) {
+                    bool allClientReady = true;
+                    foreach (ClientInfo curClient in clientInfoList) {
+                        if (curClient.score[0] == 0) {
+                            allClientReady = false;
+                            break;
+                        }
+                    }
+
+                    if (allClientReady) {
+                        acceptClients = false;
+                        byte[] sendBuffer2 = new byte[4];
+                        BufferSetup(sendBuffer2);
+                        SendNetworkCallback(clientInfoList, sendBuffer2);
+
+                        Console.WriteLine("Exiting Lobby");
+                    }
+                }
+                else if (!acceptClients && clientInfoList.Count == 0) {
+                    acceptClients = true;
+                    Console.WriteLine("Entering Lobby");
+                }
 
                 if ((dirtyFlag & DirtyFlag.Transform) == DirtyFlag.Transform)
                     curExtraSend = maxExtraSend;
@@ -584,6 +613,17 @@ namespace Server {
             buffer[0] = (byte)ClientNetworkCalls.TCPSetClientName;
             buffer[1] = id;
             Encoding.ASCII.GetBytes(clientName, 0, clientName.Length, buffer, 4);
+        }
+
+        private static void BufferSetup(byte[] buffer, byte id, byte score) {
+            buffer[0] = (byte)ClientNetworkCalls.TCPClientScore;
+            buffer[1] = id;
+            buffer[2] = score;
+        }
+
+        private static void BufferSetup(byte[] buffer) {
+            //Delobby, TCP
+            buffer[0] = (byte)ClientNetworkCalls.TCPDelobby;
         }
     }
 }

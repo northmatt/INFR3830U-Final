@@ -27,6 +27,7 @@ public enum ClientNetworkCalls : byte {
     TCPSetClientName = 4,
     TCPClientMessage = 5,
     TCPClientScore = 6,
+    TCPDelobby = 7,
     UDPClientsTransform = 0 + 0x10
 }
 
@@ -245,6 +246,19 @@ public class OnlineSyncController : MonoBehaviour {
                 GameController.instance.AddCommand(data);
                 break;
             case ClientNetworkCalls.TCPClientScore:
+                if (bufferLength != 4) {
+                    Debug.Log("Incorrect Buffer Length");
+                    break;
+                }
+
+                GameController.instance.AddCommand(data);
+                break;
+            case ClientNetworkCalls.TCPDelobby:
+                if (bufferLength != 4) {
+                    Debug.Log("Incorrect Buffer Length");
+                    break;
+                }
+
                 GameController.instance.AddCommand(data);
                 break;
             default:
